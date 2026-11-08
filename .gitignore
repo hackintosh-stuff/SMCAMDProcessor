@@ -1,9 +1,9 @@
 
-Lilu.kext/
-VirtualSMC.kext/
+Lilu.kext
+VirtualSMC.kext
 VirtualSMC/
 SMCAMDProcessor.xcodeproj/
 .DS_Store
-
+build
 cleanup.py
-
+.omc

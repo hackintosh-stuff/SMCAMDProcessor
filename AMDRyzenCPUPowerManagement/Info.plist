@@ -22,6 +22,10 @@
 	<dict>
 		<key>wtf.spinach.AMDRyzenCPUPowerManagement</key>
 		<dict>
+			<key>CPBStatus</key>
+			<integer>1</integer>
+			<key>SpeedID</key>
+			<integer>0</integer>
 			<key>CFBundleIdentifier</key>
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>IOClass</key>

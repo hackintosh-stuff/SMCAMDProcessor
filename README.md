@@ -63,6 +63,34 @@ Currently only a limited amount of SMC controllers are supported.
 <img src="imgs/iStats.png" width="40%">
 
 
+## Boot-time CPB state and fixed P-state
+
+`AMDRyzenCPUPowerManagement.kext` reads two optional properties from its own
+`Info.plist` personality:
+
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `CPBStatus` | `1` | Core Performance Boost state applied at boot: `1` leaves CPB untouched, `0` disables it. |
+| `SpeedID` | `0` | Index into the P-state table used as a fixed frequency while CPB is disabled (`0` keeps the hardware selection). Look the index up in `AMD Power Gadget.app` under `Speed` -> `Advanced Options`. |
+
+The selected state is also restored after a sleep/wake cycle.
+
+## Local build
+
+`Scripts/build.sh` builds all four targets and produces `build/Release.zip`
+(whose root contains `AMDRyzenCPUPowerManagement.kext`, `SMCAMDProcessor.kext` and
+`AMD Power Gadget.app`) together with a summary of the product versions.
+
+The script prepares its dependencies itself (`MacKernelSDK` submodule, `Lilu.kext`,
+`VirtualSMC`) and reuses prebuilt dependencies from `../sdk` when they are present
+instead of downloading them.
+
+Common options: `--clean` (full rebuild), `--configuration Debug`, `--skip-deps`,
+`--no-zip`, `--help`.
+
+> The kext version is maintained in a single place, the `AMDRYZEN_KEXT_VERSION`
+> build setting in the Xcode project, so a release bump only touches that value.
+
 ## Contribution
 #### If you like this project, please consider supporting it via:
 
