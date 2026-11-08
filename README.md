@@ -91,6 +91,24 @@ Common options: `--clean` (full rebuild), `--configuration Debug`, `--skip-deps`
 > The kext version is maintained in a single place, the `AMDRYZEN_KEXT_VERSION`
 > build setting in the Xcode project, so a release bump only touches that value.
 
+### Building the kexts without Xcode
+
+`Scripts/build-noxcode.sh` builds `AMDRyzenCPUPowerManagement.kext` and
+`SMCAMDProcessor.kext` with nothing but the Command Line Tools (clang, `ld -kext`,
+the MacKernelSDK headers and libkmod/libkmodc++), for machines where `xcodebuild`
+is a stub.
+
+It needs `MacKernelSDK` (the submodule), `Lilu.kext` for the kernel headers it
+ships, and the `VirtualSMCSDK` headers for the SMC plugin. All of them are looked
+up in the repository and in `../sdk`; they can also be given explicitly with
+`--sdk`, `--lilu` and `--vsmc`. `--only amd` builds the power management kext
+alone (it does not need VirtualSMC).
+
+Every run produces its own `build/noxcode.XXXXXX` directory and the newest one is
+recorded in `build/latest-noxcode-build.txt`. The products are ad-hoc signed and
+nothing is deployed. `AMD Power Gadget` and `APGLaunchHelper` are Swift/AppKit
+targets and still require Xcode, so they are not built here.
+
 ## Contribution
 #### If you like this project, please consider supporting it via:
 
