@@ -159,7 +159,6 @@ public:
     uint8_t getPowerControl();
 
     /**
-    /**
      *  0.7.6: single entry point for user alerts.
      *
      *  kunc_alert stays nullptr when _KUNCUserNotificationDisplayAlert cannot be
@@ -177,7 +176,6 @@ public:
      *  button index (the CFUserNotification default button), so using it as "the
      *  user was not asked" would be misread as "the user pressed the first
      *  button".
-     */
      */
     bool presentAlert(const char *title, const char *body,
                       const char *btn1, const char *btn2, const char *btn3,
