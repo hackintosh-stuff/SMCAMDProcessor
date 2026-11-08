@@ -421,7 +421,11 @@ bool AMDRyzenCPUPowerManagement::start(IOService *provider){
     
     CPUInfo::getCpuid(1, 0, &cpuid_eax, &cpuid_ebx, &cpuid_ecx, &cpuid_edx);
     cpuFamily = ((cpuid_eax >> 20) & 0xff) + ((cpuid_eax >> 8) & 0xf);
-    cpuModel = ((cpuid_eax >> 16) & 0xf) + ((cpuid_eax >> 4) & 0xf);
+    // CPUID Fn0000_0001: model = extended model (EAX[19:16]) << 4 | base model
+    // (EAX[7:4]). The old code *added* the two fields, so every model with a
+    // non-zero extended nibble (0x50 on Cezanne, for instance) was decoded as a
+    // different model and never matched the entries in tctl_offset_table[].
+    cpuModel = (((cpuid_eax >> 16) & 0xf) << 4) | ((cpuid_eax >> 4) & 0xf);
     
     //Only 17h Family are supported offically by now.
     // EDIT: add check bypass for 19h Zen 3 processors
