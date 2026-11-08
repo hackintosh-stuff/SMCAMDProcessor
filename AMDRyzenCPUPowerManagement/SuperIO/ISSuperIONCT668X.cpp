@@ -10,8 +10,14 @@
 ISSuperIONCT668X::ISSuperIONCT668X(int psel, uint16_t addr, uint16_t chipIntel){
     lpcPortSel = psel;
     chipAddr = addr;
-    
-    activeFansOnSystem = NCT668X_MAX_NUMFAN;
+    chipModel = chipIntel & 0xfff0;
+
+    // NCT6687D drives eight fan channels; the older parts can drive up to 16.
+    if (chipModel == CHIP_NCT6687) {
+        activeFansOnSystem = 8;
+    } else {
+        activeFansOnSystem = NCT668X_MAX_NUMFAN;
+    }
     
     //backup default ctrl mode
 //    for (int i = 0; i < activeFansOnSystem; i++) {
@@ -42,8 +48,9 @@ ISSuperIONCT668X* ISSuperIONCT668X::getDevice(uint16_t *chipIntel){
         switch (((deviceID << 8) | revision) & 0xfff0) {
             case CHIP_NCT6681:
             case CHIP_NCT6683:
+            case CHIP_NCT6687:
                 found = true;
-                IOLog("NCT668X chip identified\n");
+                IOLog("NCT668X chip identified: 0x%04X\n", ((deviceID << 8) | revision) & 0xfff0);
                 break;
                 
             default:
@@ -77,6 +84,7 @@ ISSuperIONCT668X* ISSuperIONCT668X::getDevice(uint16_t *chipIntel){
         //in short these is all of what we currentlt supports.
         case CHIP_NCT6681:
         case CHIP_NCT6683:
+        case CHIP_NCT6687:
             conf = ISLPCPort::readByte(portSel, 0x30);
             if(conf & 0x01){
                 ISLPCPort::writeByte(portSel, 0x30, conf & 0x01);
@@ -119,7 +127,10 @@ int ISSuperIONCT668X::getNumberOfFans(){
 
 const char *ISSuperIONCT668X::getReadableStringForFan(int fan){
     if(fan < 0 || fan >= activeFansOnSystem) return nullptr;
-    //TODO: label fans
+    if(chipModel == CHIP_NCT6687 && fan < 8) {
+        return kNCT6687_FAN_READABLE_STRS[fan];
+    }
+    //TODO: label fans on the other parts
     return kFAN_READABLE_STRS[0];
 }
 
@@ -139,11 +150,18 @@ uint8_t ISSuperIONCT668X::getFanThrottle(int fan){
 }
 
 void ISSuperIONCT668X::updateFanRPMS(){
-   
+    // NCT6687D does not use the sequential 0x140 + n * 2 map of the older parts.
+    static const uint16_t kNCT6687_RPM_REGS[8] = {
+        0x140, 0x142, 0x15E, 0x15C, 0x15A, 0x158, 0x156, 0x154
+    };
+
     for (int i = 0; i < activeFansOnSystem; i++) {
-        int v = (int)readWord(FAN_RPM_REGS(i));
-        fanRPMs[i] = v;
-//        IOLog("fan %d: %d\n", i, (int)v);
+        uint16_t reg = (chipModel == CHIP_NCT6687 && i < 8) ? kNCT6687_RPM_REGS[i] : FAN_RPM_REGS(i);
+        uint16_t raw = readWord(reg);
+        // Values with bit 14 or above set are not RPM readings (channel absent or
+        // reporting an error); publishing them would show absurd fan speeds.
+        fanRPMs[i] = (raw >= (1U << 14)) ? 0 : raw;
+//        IOLog("fan %d: %d\n", i, (int)raw);
     }
 }
 
