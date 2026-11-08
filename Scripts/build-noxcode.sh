@@ -227,8 +227,16 @@ CFLAGS_C="-std=gnu11"
 gen_kmod_info() { # $1=file $2=bundle id $3=version $4=module start sym|"" $5=module stop sym|""
     _start_sym=0
     _stop_sym=0
-    if [ -n "$4" ]; then _start_sym="(kmod_start_func_t *)&$4"; fi
-    if [ -n "$5" ]; then _stop_sym="(kmod_stop_func_t *)&$5"; fi
+    _decls=
+    if [ -n "$4" ]; then
+        _start_sym="(kmod_start_func_t *)&$4"
+        _decls="extern kern_return_t $4(kmod_info_t *, void *);"
+    fi
+    if [ -n "$5" ]; then
+        _stop_sym="(kmod_stop_func_t *)&$5"
+        _decls="$_decls
+extern kern_return_t $5(kmod_info_t *, void *);"
+    fi
 
     cat > "$1" <<KMOD_EOF
 #include <mach/kmod.h>
@@ -237,6 +245,7 @@ gen_kmod_info() { # $1=file $2=bundle id $3=version $4=module start sym|"" $5=mo
 extern "C" {
 extern kern_return_t _start(kmod_info_t *, void *);
 extern kern_return_t _stop(kmod_info_t *, void *);
+$_decls
 
 KMOD_EXPLICIT_DECL($2, "$3", _start, _stop);
 
@@ -248,8 +257,12 @@ KMOD_EOF
 }
 
 # --------------------------------------------------------------- building --
+# $2 is the symbol name as nm prints it, i.e. the Mach-O name: kmod_info appears
+# as _kmod_info, while _start/_stop (which libkmod declares __private_extern__)
+# appear as __start/__stop in the local table. nm -g would hide those, so the
+# whole symbol table is inspected and undefined entries ("U name") are rejected.
 have_defined_symbol() {
-    nm -g "$1" 2>/dev/null | grep -Eq "^[0-9a-fA-F]+ [A-Za-z] $2\$"
+    nm "$1" 2>/dev/null | awk -v s="$2" '$NF == s && $1 != "U" { f = 1 } END { exit !f }'
 }
 
 expand_plist() { # $1=source plist $2=destination $3=kext name $4=bundle id $5=version
@@ -318,8 +331,8 @@ build_kext() { # $1=name $2=bundle $3=version $4=modstart $5=modstop $6=srcdir $
 
     # ------------------------------------------------------- verification --
     have_defined_symbol "$BIN" _kmod_info || die "$KNAME: _kmod_info is missing, the kext cannot be loaded"
-    have_defined_symbol "$BIN" _start     || die "$KNAME: _start is missing (libkmod did not provide it)"
-    have_defined_symbol "$BIN" _stop      || die "$KNAME: _stop is missing (libkmod did not provide it)"
+    have_defined_symbol "$BIN" __start    || die "$KNAME: _start is missing (libkmod did not provide it)"
+    have_defined_symbol "$BIN" __stop     || die "$KNAME: _stop is missing (libkmod did not provide it)"
 
     FILETYPE=$(otool -h "$BIN" | awk 'NR>1{print $5}' | tr -d ' ' | tail -1)
     [ "$FILETYPE" = "11" ] || die "$KNAME: filetype=$FILETYPE, expected 11 (MH_KEXT_BUNDLE)"
@@ -357,7 +370,7 @@ if [ "$ONLY" = "all" ] || [ "$ONLY" = "amd" ]; then
         amdryzencpupm_kern_start amdryzencpupm_kern_stop \
         "$ROOT/AMDRyzenCPUPowerManagement" \
         "AMDRyzenCPUPowerManagement.cpp AMDRyzenCPUPMUserClient.cpp pmAMDRyzen.c symresolver/kernel_resolver.c SuperIO/ISSuperIOIT86XXEFamily.cpp SuperIO/ISSuperIONCT668X.cpp SuperIO/ISSuperIONCT67XXFamily.cpp" \
-        "-I $SDK/Headers -I $LILU_INC" \
+        "-I $SDK/Headers -I $SDK -I $LILU_INC" \
         "-DPRODUCT_NAME=AMDRyzenCPUPowerManagement -DMODULE_VERSION=$AMD_VER -DPMRYZEN_IDLE_IO_CSTATE"
     check_internal_symbols "$W/AMDRyzenCPUPowerManagement.kext" \
         'AMDRyzenCPUPowerManagement::|AMDRyzenCPUPMUserClient::|pmRyzen_|ISSuperIO|ISLPCPort|kernel_resolver|_ksym_'
