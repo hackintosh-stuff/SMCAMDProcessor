@@ -89,6 +89,18 @@ void AMDRyzenCPUPMUserClient::stop(IOService *provider){
     IOService::stop(provider);
 }
 
+// Without this, every open/close (or process exit) leaked one user client
+// instance until the user client slots were exhausted and IOServiceOpen failed.
+IOReturn AMDRyzenCPUPMUserClient::clientClose(){
+    // The default implementation is a no-op. terminate() releases the instance,
+    // which is what actually frees the slot; isInactive() keeps this safe to
+    // call when the provider is already being torn down.
+    if(!isInactive())
+        terminate();
+
+    return kIOReturnSuccess;
+}
+
 //this is a meme, not getting the joke? nvm.
 uint64_t multiply_two_numbers(uint64_t number_one, uint64_t number_two){
     uint64_t number_three = 0;
