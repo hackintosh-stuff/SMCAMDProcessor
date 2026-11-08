@@ -47,7 +47,8 @@ Usage: sh Scripts/build-noxcode.sh [options]
 
 Options:
   --sdk <dir>       MacKernelSDK root (default: <repo>/MacKernelSDK, else $MACKERNELSDK)
-  --lilu <dir>      Lilu.kext directory (default: <repo>/Lilu.kext, ../sdk/Lilu.kext, $LILU)
+  --lilu <dir>      Lilu.kext or a Lilu source dir containing Headers/
+                    (default: <repo>/Lilu.kext, ../sdk/Lilu.kext, $LILU)
   --vsmc <path>     VirtualSMC.kext or a VirtualSMC source tree
                     (default: <repo>/VirtualSMC.kext, ../sdk/VirtualSMC.kext,
                      <repo>/VirtualSMC, $VIRTUALSMC)
@@ -121,10 +122,17 @@ find_sdk() {
     return 0
 }
 
+# Prints the directory to pass as -I so that <Headers/kern_util.hpp> resolves.
+# Accepts a prebuilt Lilu.kext (Contents/Resources/Headers) and a Lilu source
+# tree (Lilu/Headers, i.e. the directory that contains Headers/).
 find_lilu() {
-    for cand in "$LILU_ARG" "$ROOT/Lilu.kext" "$ROOT/../sdk/Lilu.kext" "$HOME/Lilu.kext"; do
+    for cand in "$LILU_ARG" "$ROOT/Lilu.kext" "$ROOT/../sdk/Lilu.kext" "$HOME/Lilu.kext" "$HOME/Lilu"; do
         [ -n "$cand" ] || continue
         if [ -f "$cand/Contents/Resources/Headers/kern_util.hpp" ]; then
+            printf '%s\n' "$cand/Contents/Resources"
+            return 0
+        fi
+        if [ -f "$cand/Headers/kern_util.hpp" ]; then
             printf '%s\n' "$cand"
             return 0
         fi
@@ -154,12 +162,14 @@ SDK=$(CDPATH= cd -- "$SDK" && pwd)
 [ -f "$SDK/Library/universal/libkmodc++.a" ] || die "incomplete MacKernelSDK, missing Library/universal/libkmodc++.a: $SDK"
 [ -f "$SDK/Library/x86_64/libkmod.a" ] || die "incomplete MacKernelSDK, missing Library/x86_64/libkmod.a: $SDK"
 
-LILU=$(find_lilu)
-if [ -z "$LILU" ]; then
-    die "Lilu.kext not found. Both kexts include Headers/kern_*.hpp and Headers/plugin_start.hpp from it.
-       Place it at \$REPO/Lilu.kext (or ../sdk/Lilu.kext), or pass --lilu <dir>."
+LILU_INC=$(find_lilu)
+if [ -z "$LILU_INC" ]; then
+    die "Lilu headers not found. Both kexts include Headers/kern_*.hpp and Headers/plugin_start.hpp.
+       Point --lilu at a Lilu.kext (Contents/Resources/Headers) or at a Lilu source
+       directory that contains Headers/ (for example <lilu-src>/Lilu), or place one at
+       \$REPO/Lilu.kext or ../sdk/Lilu.kext."
 fi
-LILU=$(CDPATH= cd -- "$LILU" && pwd)
+LILU_INC=$(CDPATH= cd -- "$LILU_INC" && pwd)
 
 VSMC_INC=
 if [ "$ONLY" != "amd" ]; then
@@ -177,7 +187,7 @@ echo "config : $CONFIG ($OPT)"
 echo "repo   : $ROOT"
 xcrun clang --version | head -1
 echo "sdk    : $SDK"
-echo "lilu   : $LILU"
+echo "lilu   : $LILU_INC"
 if [ -n "$VSMC_INC" ]; then
     echo "vsmc   : $VSMC_INC"
 fi
@@ -347,7 +357,7 @@ if [ "$ONLY" = "all" ] || [ "$ONLY" = "amd" ]; then
         amdryzencpupm_kern_start amdryzencpupm_kern_stop \
         "$ROOT/AMDRyzenCPUPowerManagement" \
         "AMDRyzenCPUPowerManagement.cpp AMDRyzenCPUPMUserClient.cpp pmAMDRyzen.c symresolver/kernel_resolver.c SuperIO/ISSuperIOIT86XXEFamily.cpp SuperIO/ISSuperIONCT668X.cpp SuperIO/ISSuperIONCT67XXFamily.cpp" \
-        "-I $SDK/Headers -I $LILU/Contents/Resources" \
+        "-I $SDK/Headers -I $LILU_INC" \
         "-DPRODUCT_NAME=AMDRyzenCPUPowerManagement -DMODULE_VERSION=$AMD_VER -DPMRYZEN_IDLE_IO_CSTATE"
     check_internal_symbols "$W/AMDRyzenCPUPowerManagement.kext" \
         'AMDRyzenCPUPowerManagement::|AMDRyzenCPUPMUserClient::|pmRyzen_|ISSuperIO|ISLPCPort|kernel_resolver|_ksym_'
@@ -360,7 +370,7 @@ if [ "$ONLY" = "all" ] || [ "$ONLY" = "smc" ]; then
         "" "" \
         "$ROOT/SMCAMDProcessor" \
         "SMCAMDProcessor.cpp Keyimplementations.cpp" \
-        "-I $SDK/Headers -I $SDK -I $LILU/Contents/Resources -I $VSMC_INC -I $ROOT/AMDRyzenCPUPowerManagement" \
+        "-I $SDK/Headers -I $SDK -I $LILU_INC -I $VSMC_INC -I $ROOT/AMDRyzenCPUPowerManagement" \
         ""
     # AMDRyzenCPUPowerManagement::* stays unresolved by design: this kext has no
     # code of that class, it resolves it against the already loaded kext.
