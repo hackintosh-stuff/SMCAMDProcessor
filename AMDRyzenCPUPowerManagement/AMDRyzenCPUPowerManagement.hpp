@@ -60,7 +60,7 @@ void i386_deactivate_cpu(void);
 //    int wrmsr_carefully(uint32_t msr, uint64_t val);
 
 
-void pmRyzen_wrmsr_safe(void *, uint32_t, uint64_t);
+int pmRyzen_wrmsr_safe(void *, uint32_t, uint64_t);
 uint64_t pmRyzen_rdmsr_safe(void *, uint32_t);
 
 
@@ -77,6 +77,13 @@ typedef struct tctl_offset {
     char const *id;
     int offset;
 } TempOffset;
+
+typedef struct sleep_state {
+    bool sleep;
+    bool cpb;
+    uint64_t pstate[8];
+    uint8_t PStateCtl;
+} SleepState;
 
 
 static IOPMPowerState powerStates[kNrOfPowerStates] = {
@@ -146,12 +153,35 @@ public:
     bool write_msr(uint32_t addr, uint64_t value);
     
     
-    void updateClockSpeed(uint8_t physical);
     void calculateEffectiveFrequency(uint8_t physical);
     void updateInstructionDelta(uint8_t physical);
-    void applyPowerControl();
+    void applyPowerControl(uint8_t pstate);
+    uint8_t getPowerControl();
+
+    /**
+     *  0.7.6: single entry point for user alerts.
+     *
+     *  kunc_alert stays nullptr when _KUNCUserNotificationDisplayAlert cannot be
+     *  resolved, and the user client used to dereference it unconditionally (once
+     *  in hasPrivilege() and once in externalMethod()) - one user-space call was
+     *  enough to crash the kernel.
+     *
+     *  The null check now happens in one place:
+     *  - alert available: show it, the response is valid, return true;
+     *  - alert unavailable: degrade to IOLog, set the response to UINT_MAX and
+     *    return false ("the user was not asked" => the caller must not treat the
+     *    result as consent).
+     *
+     *  0.7.6 (Round 2 F4): the sentinel is UINT_MAX rather than 0 - 0 is a valid
+     *  button index (the CFUserNotification default button), so using it as "the
+     *  user was not asked" would be misread as "the user pressed the first
+     *  button".
+     */
+    bool presentAlert(const char *title, const char *body,
+                      const char *btn1, const char *btn2, const char *btn3,
+                      unsigned int *response);
     
-    void setCPBState(bool enabled);
+    bool setCPBState(bool enabled);
     bool getCPBState();
     
 #define HF_TEMP_SAMPLE_SECS 3
@@ -167,8 +197,9 @@ public:
     
     void registerRequest();
     
-    void dumpPstate();
+    bool dumpPstate(uint64_t buf[8], bool allowLog = true);
     void writePstate(const uint64_t *buf);
+    void restoreWakeState();
     
     bool initSuperIO(uint16_t* chipIntel);
     
@@ -216,10 +247,43 @@ public:
     
     uint8_t PStateCur_perCore[CPUInfo::MaxCpus];
     uint8_t PStateCtl = 0;
-    uint64_t PStateDef_perCore[8];
-    uint8_t PStateEnabledLen = 0;
-    float PStateDefClock_perCore[8];
+    // Zero-initialized: the wake path snapshots/restores these caches without
+    // re-reading the MSRs, so an untouched slot must read as "no definition"
+    // (0 fails the fid/dfsId validity check) rather than as kalloc garbage.
+    uint64_t PStateDef_perCore[8] {};
+    float PStateDefClock_perCore[8] {};
     bool cpbSupported;
+
+    // Per-CPU flag: the HWCR init (setting bit 30) failed on this CPU and has
+    // to be retried. Each CPU only touches its own slot, so no cross-CPU race.
+    bool hwcrInitPending[CPUInfo::MaxCpus] {};
+
+    // Per-CPU retry budget for the HWCR init. 0.7.6: the retry used to be
+    // unbounded — a permanently unreadable HWCR meant one read + one write
+    // inside the no-interrupt barrier on every single tick, forever. The
+    // budget is refilled on each wake re-init. Each CPU only touches its own
+    // slot, so no cross-CPU race.
+    uint8_t hwcrInitRetryLeft[CPUInfo::MaxCpus] {};
+
+    // 0.7.6: set when the cached P-state table could not be (re)read AND the
+    // bounded retry budget ran out. The work loop reports it OUTSIDE the
+    // rendezvous barrier (IOLog inside a no-interrupt barrier is exactly what
+    // the 2026-08-26 panic taught us not to do).
+    bool pstateDumpRetryExhausted {};
+
+    // Set when the cached P-state table could not be (re)read; the work loop
+    // retry tick re-runs dumpPstate() on the master CPU until it succeeds.
+    bool pstateDumpPending {};
+
+    // Bounded retry budget for the pstateDumpPending re-dump: every rdmsr
+    // takes cpu_lock inside the rendezvous barrier, so a permanently
+    // unreadable P-state MSR must not retry every tick forever. Refilled on
+    // each wake re-init and on every explicit user writePstate().
+    uint8_t pstateDumpRetryLeft { 20 };
+
+    // Set once lastAPERF/lastMPERF hold a real sample, so a failed boot-time
+    // seed does not yield one frequency sample scaled from cumulative counters.
+    bool freqCountersSeeded[CPUInfo::MaxCpus] {};
     
     
     uint64_t lastUpdateTime;
@@ -256,8 +320,26 @@ private:
     double pwrTimeUnit = 0;
     double pwrEnergyUnit = 0;
     uint64_t pwrLastTSC = 0;
+    // 0.7.6 (Round 2 P2): when the RAPL unit register cannot be read (the old code
+    // panicked here) power measurement is disabled entirely instead of taking the
+    // machine down.
+    bool raplValid = false;
+    // 0.7.6 (T8 / O24): after sleep the RAPL counter may restart from 0, so
+    // subtracting the pre-sleep baseline would give a huge delta => a huge spike in
+    // the first power reading after wake. Raised in the wake branch, where the work
+    // loop is still disabled; the first sample after wake re-establishes the
+    // baseline.
+    bool pwrNeedRebaseline = false;
+    // 0.7.6 (T8 / O12): throttle timestamp (ns) for the dual-value comparison log.
+    // The main work-loop timer can fire every 50 ms and printing on every sample
+    // would flood the log; once per 30 s is enough to see the trend.
+    uint64_t lastPowerDiagNs = 0;
     
     uint64_t xnuTSCFreq = 1;
+    // 0.7.6: _tscFreq is a pointer to a kernel variable. When the symbol is
+    // missing, dereferencing it panicked the kernel at start(); the frequency
+    // is now validated and the dependent power measurement is skipped.
+    bool tscFreqValid = false;
     int (*wrmsr_carefully)(uint32_t, uint32_t, uint32_t) {nullptr};
     processor_t(*cpu_to_processor)(int);
     kern_return_t(*processor_shutdown)(processor_t);
@@ -270,7 +352,8 @@ private:
     KernelPatcher *liluKernelPatcher;
     
     bool getPCIService();
-    bool wentToSleep;
+    
+    SleepState sleepState;
     
     void initWorkLoop();
     void stopWorkLoop();

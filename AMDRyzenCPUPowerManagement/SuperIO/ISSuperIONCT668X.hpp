@@ -17,6 +17,7 @@
 
 #define CHIP_NCT6681 0xb270
 #define CHIP_NCT6683 0xc730
+#define CHIP_NCT6687 0xd590
 
 
 #define NCT668X_MAX_NUMFAN 16
@@ -47,6 +48,18 @@ class ISSuperIONCT668X : public ISSuperIOSMCFamily {
 public:
     static constexpr const char *kFAN_READABLE_STRS[] = {
         "Fan",
+    };
+
+    // NCT6687D exposes eight fan channels in a documented order.
+    static constexpr const char *kNCT6687_FAN_READABLE_STRS[8] = {
+        "CPU Fan",
+        "Pump Fan",
+        "System Fan #1",
+        "System Fan #2",
+        "System Fan #3",
+        "System Fan #4",
+        "System Fan #5",
+        "System Fan #6",
     };
     
     static ISSuperIONCT668X* getDevice(uint16_t *chipIntel);
@@ -79,6 +92,7 @@ private:
     int lpcPortSel = 0;
     
     uint16_t chipAddr = 0;
+    uint16_t chipModel = 0;
     uint8_t fanDefaultControlMode[NCT668X_MAX_NUMFAN];
     
     uint8_t readByte(uint16_t addr);

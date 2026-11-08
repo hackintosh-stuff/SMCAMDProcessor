@@ -63,6 +63,52 @@ Currently only a limited amount of SMC controllers are supported.
 <img src="imgs/iStats.png" width="40%">
 
 
+## Boot-time CPB state and fixed P-state
+
+`AMDRyzenCPUPowerManagement.kext` reads two optional properties from its own
+`Info.plist` personality:
+
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `CPBStatus` | `1` | Core Performance Boost state applied at boot: `1` leaves CPB untouched, `0` disables it. |
+| `SpeedID` | `0` | Index into the P-state table used as a fixed frequency while CPB is disabled (`0` keeps the hardware selection). Look the index up in `AMD Power Gadget.app` under `Speed` -> `Advanced Options`. |
+
+The selected state is also restored after a sleep/wake cycle.
+
+## Local build
+
+`Scripts/build.sh` builds all four targets and produces `build/Release.zip`
+(whose root contains `AMDRyzenCPUPowerManagement.kext`, `SMCAMDProcessor.kext` and
+`AMD Power Gadget.app`) together with a summary of the product versions.
+
+The script prepares its dependencies itself (`MacKernelSDK` submodule, `Lilu.kext`,
+`VirtualSMC`) and reuses prebuilt dependencies from `../sdk` when they are present
+instead of downloading them.
+
+Common options: `--clean` (full rebuild), `--configuration Debug`, `--skip-deps`,
+`--no-zip`, `--help`.
+
+> The kext version is maintained in a single place, the `AMDRYZEN_KEXT_VERSION`
+> build setting in the Xcode project, so a release bump only touches that value.
+
+### Building the kexts without Xcode
+
+`Scripts/build-noxcode.sh` builds `AMDRyzenCPUPowerManagement.kext` and
+`SMCAMDProcessor.kext` with nothing but the Command Line Tools (clang, `ld -kext`,
+the MacKernelSDK headers and libkmod/libkmodc++), for machines where `xcodebuild`
+is a stub.
+
+It needs `MacKernelSDK` (the submodule), `Lilu.kext` for the kernel headers it
+ships, and the `VirtualSMCSDK` headers for the SMC plugin. All of them are looked
+up in the repository and in `../sdk`; they can also be given explicitly with
+`--sdk`, `--lilu` and `--vsmc`. `--only amd` builds the power management kext
+alone (it does not need VirtualSMC).
+
+Every run produces its own `build/noxcode.XXXXXX` directory and the newest one is
+recorded in `build/latest-noxcode-build.txt`. The products are ad-hoc signed and
+nothing is deployed. `AMD Power Gadget` and `APGLaunchHelper` are Swift/AppKit
+targets and still require Xcode, so they are not built here.
+
 ## Contribution
 #### If you like this project, please consider supporting it via:
 
