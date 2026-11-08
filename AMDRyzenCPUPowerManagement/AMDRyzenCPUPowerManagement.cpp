@@ -973,23 +973,38 @@ bool AMDRyzenCPUPowerManagement::getCPBState(){
 }
 
 inline float AMDRyzenCPUPowerManagement::getPackageTemp() {
+    // Fallback used whenever the register read yields nothing usable: keep the
+    // last published package temperature, or a neutral 45 C before the first
+    // sample. Publishing 0 C (or a value derived from 0xFFFFFFFF) makes sensor
+    // apps show a bogus reading, and some of them treat it as a critical value.
+    const float fallback = (PACKAGE_TEMPERATURE_perPackage[0] > 0)
+        ? PACKAGE_TEMPERATURE_perPackage[0] : 45.0f;
+
+    // getPCIService() can fail (see start()), and this runs on the work loop.
+    if(!fIOPCIDevice) return fallback;
+
     IOPCIAddressSpace space;
     space.bits = 0x00;
-    
+
     fIOPCIDevice->configWrite32(space, (UInt8)kFAMILY_17H_PCI_CONTROL_REGISTER, (UInt32)kF17H_M01H_THM_TCON_CUR_TMP);
     uint32_t temperature = fIOPCIDevice->configRead32(space, kFAMILY_17H_PCI_CONTROL_REGISTER + 4);
-    
-    
+
+    // A failed config read returns all ones, and 0 is not a plausible Tctl value.
+    if(temperature == 0xFFFFFFFF || temperature == 0) return fallback;
+
     bool tempOffsetFlag = (temperature & kF17H_TEMP_OFFSET_FLAG) != 0;
     temperature = (temperature >> 21) * 125;
-    
+
     float t = temperature * 0.001f;
-    
+
     t -= tempOffset;
-    
+
     if (tempOffsetFlag)
         t -= 49.0f;
-    
+
+    // Anything outside this range is a decode error, not a real temperature.
+    if(t <= 0.0f || t > 120.0f) return fallback;
+
     return t;
 }
 
